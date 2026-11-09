@@ -57,7 +57,12 @@ try:
             status()
     elif MODE == "status":
         status()
-        rc, out = k(["kernels", "logs", KERNEL], 300)
+        try:      # a running session's log only comes as a stream: read it for a while, keep what arrived
+            r = subprocess.run(["kaggle", "kernels", "logs", KERNEL, "--follow"], capture_output=True, text=True, timeout=45)
+            out = r.stdout + r.stderr
+        except subprocess.TimeoutExpired as e:
+            out = e.stdout or b""
+            out = out.decode("utf-8", "replace") if isinstance(out, bytes) else out
         lines = []
         for line in out.splitlines():
             s = line.strip().lstrip(",").rstrip(",")
