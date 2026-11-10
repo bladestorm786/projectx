@@ -82,12 +82,21 @@ try:
         print("OUTPUT", rc, out.strip()[-300:], flush=True)
         n = 0
         for p in sorted(glob.glob("dl/**/*", recursive=True)):
-            if os.path.isfile(p):
-                name = os.path.relpath(p, "dl").replace("/", "__") + ".enc"
-                subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-salt", "-pass", "env:RELAY_PASS", "-in", p,
-                                "-out", "pub/" + name], check=True)
-                print("FILE", name, os.path.getsize(p), flush=True)
+            if not os.path.isfile(p):
+                continue
+            base = os.path.relpath(p, "dl").replace("/", "__")
+            size = os.path.getsize(p)
+            parts = [p]
+            if size > 90 * 2 ** 20:          # GitHub refuses files over 100 MB: send big ones in pieces
+                subprocess.run(["split", "-b", "85m", "-d", "-a", "2", p, p + ".part"], check=True)
                 os.remove(p)
+                parts = sorted(glob.glob(p + ".part*"))
+            for q in parts:
+                name = (base + q[len(p):]) + ".enc"
+                subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-salt", "-pass", "env:RELAY_PASS", "-in", q,
+                                "-out", "pub/" + name], check=True)
+                print("FILE", name, os.path.getsize(q), flush=True)
+                os.remove(q)
                 n += 1
         print("FETCH done:", n, "files", flush=True)
 except Exception as e:
