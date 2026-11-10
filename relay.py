@@ -72,6 +72,10 @@ try:
                 lines.append(line.rstrip())
         for x in [l for l in lines if l][-int(os.environ.get("TAIL", "40")):]:
             print("LOG", x[:400].replace(PW, "***"), flush=True)
+    elif MODE == "quota":
+        rc, out = k(["quota"], 120)
+        for line in out.strip().splitlines()[-30:]:
+            print("QUOTA", line[:300], flush=True)
     elif MODE == "fetch":
         status()
         rc, out = k(["kernels", "output", KERNEL, "-p", "dl"], 3000)
