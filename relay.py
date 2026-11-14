@@ -4,6 +4,7 @@ finished run's files, encrypt them and serve them), idle. It always ends by serv
 import os, sys, json, subprocess, glob, http.server, functools
 
 MODE = os.environ.get("MODE", "idle")
+ACCEL = os.environ.get("ACCEL", "NvidiaTeslaT4")        # or NvidiaTeslaP100
 KERNEL = os.environ.get("KERNEL", "")              # owner/slug
 PW = os.environ.get("RELAY_PASS", "")
 REPO_RAW = os.environ.get("BUNDLE_URL", "")
@@ -47,11 +48,11 @@ try:
             os.makedirs("nb", exist_ok=True)
             slug = KERNEL.split("/")[1]
             json.dump({"id": KERNEL, "title": slug, "code_file": "run.py", "language": "python", "kernel_type": "script",
-                       "is_private": True, "enable_gpu": True, "enable_internet": True, "machine_shape": "NvidiaTeslaT4",
+                       "is_private": True, "enable_gpu": True, "enable_internet": True, "machine_shape": ACCEL,
                        "dataset_sources": [], "competition_sources": [], "kernel_sources": [], "model_sources": []},
                       open("nb/kernel-metadata.json", "w"))
             open("nb/run.py", "w").write(KERNEL_CODE % {"url": REPO_RAW, "pw": PW, "job": os.environ.get("JOB", "job.json")})
-            rc, out = k(["kernels", "push", "-p", "nb", "--accelerator", "NvidiaTeslaT4"])
+            rc, out = k(["kernels", "push", "-p", "nb", "--accelerator", ACCEL])
             os.remove("nb/run.py")
             print("START", rc, out.strip()[-400:].replace(PW, "***"), flush=True)
             status()
