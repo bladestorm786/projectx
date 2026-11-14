@@ -1,7 +1,7 @@
 """Temporary relay (runs on a small web host). Everything secret comes from the host's environment, nothing from this
 public file. MODE: start (start the Kaggle run once), status (print its status and log tail), fetch (download the
 finished run's files, encrypt them and serve them), idle. It always ends by serving ./pub over HTTP."""
-import os, sys, json, subprocess, glob, http.server, functools
+import os, sys, json, subprocess, glob, http.server, functools, time
 
 MODE = os.environ.get("MODE", "idle")
 ACCEL = os.environ.get("ACCEL", "NvidiaTeslaT4")        # or NvidiaTeslaP100
@@ -73,6 +73,35 @@ try:
                 lines.append(line.rstrip())
         for x in [l for l in lines if l][-int(os.environ.get("TAIL", "40")):]:
             print("LOG", x[:400].replace(PW, "***"), flush=True)
+    elif MODE == "cancel":            # cancel my own stuck, still-queued run (CANCEL = its slug)
+        import requests
+        tokk = os.environ["KAGGLE_API_TOKEN"]
+        api = lambda svc, name, body: requests.post("https://api.kaggle.com/v1/%s/%s" % (svc, name), json=body,
+                                                    headers={"Authorization": "Bearer " + tokk}, timeout=90)
+        slug = os.environ.get("CANCEL", "")
+        owner = KERNEL.split("/")[0]
+        st = api("kernels.KernelsApiService", "GetKernelSessionStatus", {"userName": owner, "kernelSlug": slug}).text
+        print("CANCEL status of", slug, st[:200], flush=True)
+        if "QUEUED" not in st:
+            print("CANCEL skipped: not queued", flush=True)
+        else:
+            sid = None
+            r = api("search.SearchApiService", "ListEntities",
+                    {"filters": {"listType": "API_LIST_TYPE_YOUR_WORK", "privacy": "ALL", "documentTypes": ["KERNEL"]},
+                     "pageSize": 50})
+            for d in (r.json().get("documents", []) if r.status_code == 200 else []):
+                kd = d.get("kernelDocument") or {}
+                print("CANCEL found", d.get("slug"), "session", kd.get("sessionId"), d.get("updateTime"), flush=True)
+                if d.get("slug") == slug:
+                    sid = kd.get("sessionId")
+            if sid:
+                r = api("kernels.KernelsApiService", "CancelKernelSession", {"kernelSessionId": int(sid)})
+                print("CANCEL", slug, "session", sid, r.status_code, r.text[:300], flush=True)
+                time.sleep(20)
+                print("CANCEL status now", api("kernels.KernelsApiService", "GetKernelSessionStatus",
+                                                {"userName": owner, "kernelSlug": slug}).text[:200], flush=True)
+            else:
+                print("CANCEL no session id found for", slug, "search", r.status_code, flush=True)
     elif MODE == "quota":
         rc, out = k(["quota"], 120)
         for line in out.strip().splitlines()[-30:]:
