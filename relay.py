@@ -128,6 +128,51 @@ try:
                       "|", d.update_time, flush=True)
         except Exception as e:
             print("SESS search error", repr(e)[:200], flush=True)
+    elif MODE == "probe":             # raw answers about one of my notebooks (PROBE = slugs), to find a run's session id
+        from kaggle.api.kaggle_api_extended import KaggleApi
+        kapi = KaggleApi()
+        kapi.authenticate()
+        owner = KERNEL.split("/")[0]
+        red = lambda s: (s or "").replace(PW, "***") if PW else (s or "")
+        with kapi.build_kaggle_client() as kc:
+            http = kc._http_client
+            http._init_session()
+            base = http._endpoint
+            for slug in os.environ.get("PROBE", "").split(","):
+                for name, body in (("GetKernelSessionStatus", {"userName": owner, "kernelSlug": slug}),
+                                   ("ListKernelSessionOutput", {"userName": owner, "kernelSlug": slug, "pageSize": 5}),
+                                   ("GetKernel", {"userName": owner, "kernelSlug": slug})):
+                    try:
+                        r = http._session.post("%s/v1/kernels.KernelsApiService/%s" % (base, name), json=body,
+                                               headers=http._session.headers, auth=http._session.auth, timeout=60)
+                        t = r.text
+                        if name == "GetKernel":
+                            try:
+                                t = json.dumps(r.json().get("metadata", {}))
+                            except Exception:
+                                t = "(not json)"
+                        print("PROBE", slug, name, r.status_code, red(t)[:700], flush=True)
+                    except Exception as e:
+                        print("PROBE", slug, name, "error", repr(e)[:200], flush=True)
+                try:
+                    r = http._session.get("%s/v1/kernels/logs/stream/%s/%s" % (base, owner, slug), stream=True, timeout=20,
+                                          headers={"Accept": "text/event-stream, */*",
+                                                   "User-Agent": http._session.headers.get("User-Agent", "")},
+                                          auth=http._session.auth)
+                    hd = {kk: vv for kk, vv in r.headers.items() if kk.lower() not in ("set-cookie",)}
+                    body = b""
+                    try:
+                        for ch in r.iter_content(512):
+                            body += ch
+                            if len(body) > 600:
+                                break
+                    except Exception:
+                        pass
+                    r.close()
+                    print("PROBE", slug, "logs", r.status_code, json.dumps(hd)[:500], red(body.decode("utf-8", "replace"))[:600],
+                          flush=True)
+                except Exception as e:
+                    print("PROBE", slug, "logs error", repr(e)[:200], flush=True)
     elif MODE == "quota":
         rc, out = k(["quota"], 120)
         for line in out.strip().splitlines()[-30:]:
