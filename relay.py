@@ -111,6 +111,23 @@ try:
                 print("CANCEL status now", k(["kernels", "status", owner + "/" + slug], 120)[1].strip()[-200:], flush=True)
             else:
                 print("CANCEL no session id found for", slug, flush=True)
+    elif MODE == "sessions":          # which of my notebooks have a run going (to see what fills the GPU places)
+        from kaggle.api.kaggle_api_extended import KaggleApi
+        kapi = KaggleApi()
+        kapi.authenticate()
+        ks = kapi.kernels_list(mine=True, page_size=100, sort_by="dateRun") or []
+        print("SESSIONS", len(ks), "notebooks", flush=True)
+        for kk in ks[:60]:
+            rc, st = k(["kernels", "status", kk.ref], 90)
+            print("SESS", kk.ref, "| last run", kk.last_run_time, "| gpu", kk.enable_gpu, "|", kk.machine_shape, "|",
+                  st.strip()[-60:], flush=True)
+        try:
+            resp = kapi.search(query="relay", document_types=["notebook"], mine=True, page_size=100)
+            for d in (resp.documents or []):
+                print("SESS search", d.slug, "| session", d.kernel_document.session_id if d.kernel_document else None,
+                      "|", d.update_time, flush=True)
+        except Exception as e:
+            print("SESS search error", repr(e)[:200], flush=True)
     elif MODE == "quota":
         rc, out = k(["quota"], 120)
         for line in out.strip().splitlines()[-30:]:
