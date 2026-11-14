@@ -50,7 +50,8 @@ def start():
     os.makedirs("nb", exist_ok=True)
     slug = KERNEL.split("/")[1]
     json.dump({"id": KERNEL, "title": slug, "code_file": "run.py", "language": "python", "kernel_type": "script",
-               "is_private": True, "enable_gpu": True, "enable_internet": True, "machine_shape": ACCEL,
+               "is_private": True, "enable_gpu": not ACCEL.startswith("Tpu"), "enable_tpu": ACCEL.startswith("Tpu"),
+               "enable_internet": True, "machine_shape": ACCEL,
                "dataset_sources": [], "competition_sources": [], "kernel_sources": [], "model_sources": []},
               open("nb/kernel-metadata.json", "w"))
     open("nb/run.py", "w").write(KERNEL_CODE % {"url": REPO_RAW, "pw": PW, "job": os.environ.get("JOB", "job.json")})
