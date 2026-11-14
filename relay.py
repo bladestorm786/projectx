@@ -74,10 +74,11 @@ try:
         for x in [l for l in lines if l][-int(os.environ.get("TAIL", "40")):]:
             print("LOG", x[:400].replace(PW, "***"), flush=True)
     elif MODE == "cancel":            # cancel my own stuck, still-queued run (CANCEL = its slug)
-        import requests
-        tokk = os.environ["KAGGLE_API_TOKEN"]
-        api = lambda svc, name, body: requests.post("https://api.kaggle.com/v1/%s/%s" % (svc, name), json=body,
-                                                    headers={"Authorization": "Bearer " + tokk}, timeout=90)
+        # the session id comes from the CLI's own search call (the SDK builds the request; a hand-made one got 404)
+        from kaggle.api.kaggle_api_extended import KaggleApi
+        from kagglesdk.kernels.types.kernels_api_service import ApiCancelKernelSessionRequest
+        kapi = KaggleApi()
+        kapi.authenticate()
         slug = os.environ.get("CANCEL", "")
         owner = KERNEL.split("/")[0]
         rc, st = k(["kernels", "status", owner + "/" + slug], 120)
@@ -86,22 +87,30 @@ try:
             print("CANCEL skipped: not queued", flush=True)
         else:
             sid = None
-            r = api("search.SearchApiService", "ListEntities",
-                    {"filters": {"listType": "API_LIST_TYPE_YOUR_WORK", "privacy": "ALL", "documentTypes": ["KERNEL"]},
-                     "pageSize": 50})
-            print("CANCEL search", r.status_code, r.text[:300] if r.status_code != 200 else "", flush=True)
-            for d in (r.json().get("documents", []) if r.status_code == 200 else []):
-                kd = d.get("kernelDocument") or {}
-                print("CANCEL found", d.get("slug"), "session", kd.get("sessionId"), d.get("updateTime"), flush=True)
-                if d.get("slug") == slug:
-                    sid = kd.get("sessionId")
+            for q in (slug, slug.replace("-", " ")):
+                try:
+                    resp = kapi.search(query=q, document_types=["notebook"], mine=True, page_size=50)
+                except Exception as e:
+                    print("CANCEL search error", repr(e)[:300], flush=True)
+                    continue
+                for d in (resp.documents or []):
+                    kd = d.kernel_document
+                    s = kd.session_id if kd else None
+                    print("CANCEL found", d.slug, "|", d.title, "| session", s, "|", d.update_time, flush=True)
+                    if s and (d.slug or "").split("/")[-1] == slug or (s and d.title == slug):
+                        sid = s
+                if sid:
+                    break
             if sid:
-                r = api("kernels.KernelsApiService", "CancelKernelSession", {"kernelSessionId": int(sid)})
-                print("CANCEL", slug, "session", sid, r.status_code, r.text[:300], flush=True)
+                with kapi.build_kaggle_client() as kc:
+                    req = ApiCancelKernelSessionRequest()
+                    req.kernel_session_id = int(sid)
+                    r = kc.kernels.kernels_api_client.cancel_kernel_session(req)
+                print("CANCEL", slug, "session", sid, "->", (getattr(r, "error_message", None) or "ok"), flush=True)
                 time.sleep(20)
                 print("CANCEL status now", k(["kernels", "status", owner + "/" + slug], 120)[1].strip()[-200:], flush=True)
             else:
-                print("CANCEL no session id found for", slug, "search", r.status_code, flush=True)
+                print("CANCEL no session id found for", slug, flush=True)
     elif MODE == "quota":
         rc, out = k(["quota"], 120)
         for line in out.strip().splitlines()[-30:]:
