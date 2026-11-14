@@ -1,7 +1,7 @@
 """Temporary relay (runs on a small web host). Everything secret comes from the host's environment, nothing from this
 public file. MODE: start (start the Kaggle run once), status (print its status and log tail), fetch (download the
 finished run's files, encrypt them and serve them), idle. It always ends by serving ./pub over HTTP."""
-import os, sys, json, subprocess, glob, http.server, functools, time
+import os, sys, json, subprocess, glob, http.server, functools, time, threading
 
 MODE = os.environ.get("MODE", "idle")
 ACCEL = os.environ.get("ACCEL", "NvidiaTeslaT4")        # or NvidiaTeslaP100
@@ -9,6 +9,9 @@ KERNEL = os.environ.get("KERNEL", "")              # owner/slug
 PW = os.environ.get("RELAY_PASS", "")
 REPO_RAW = os.environ.get("BUNDLE_URL", "")
 os.makedirs("pub", exist_ok=True)
+_h = functools.partial(http.server.SimpleHTTPRequestHandler, directory="pub")
+threading.Thread(target=http.server.ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), _h).serve_forever,
+                 daemon=True).start()
 
 
 def k(args, timeout=900):
@@ -39,23 +42,27 @@ for line in p.stdout:
 print("JOB EXIT CODE", p.wait())
 '''
 
+def start():
+    rc, out = status()
+    if rc == 0 and "has status" in out and os.environ.get("FORCE") != "1":
+        print("START skipped: this notebook already exists", flush=True)
+        return
+    os.makedirs("nb", exist_ok=True)
+    slug = KERNEL.split("/")[1]
+    json.dump({"id": KERNEL, "title": slug, "code_file": "run.py", "language": "python", "kernel_type": "script",
+               "is_private": True, "enable_gpu": True, "enable_internet": True, "machine_shape": ACCEL,
+               "dataset_sources": [], "competition_sources": [], "kernel_sources": [], "model_sources": []},
+              open("nb/kernel-metadata.json", "w"))
+    open("nb/run.py", "w").write(KERNEL_CODE % {"url": REPO_RAW, "pw": PW, "job": os.environ.get("JOB", "job.json")})
+    rc, out = k(["kernels", "push", "-p", "nb", "--accelerator", ACCEL])
+    os.remove("nb/run.py")
+    print("START", rc, out.strip()[-400:].replace(PW, "***") if PW else out.strip()[-400:], flush=True)
+    status()
+
+
 try:
     if MODE == "start":
-        rc, out = status()
-        if rc == 0 and "has status" in out and os.environ.get("FORCE") != "1":
-            print("START skipped: this notebook already exists", flush=True)
-        else:
-            os.makedirs("nb", exist_ok=True)
-            slug = KERNEL.split("/")[1]
-            json.dump({"id": KERNEL, "title": slug, "code_file": "run.py", "language": "python", "kernel_type": "script",
-                       "is_private": True, "enable_gpu": True, "enable_internet": True, "machine_shape": ACCEL,
-                       "dataset_sources": [], "competition_sources": [], "kernel_sources": [], "model_sources": []},
-                      open("nb/kernel-metadata.json", "w"))
-            open("nb/run.py", "w").write(KERNEL_CODE % {"url": REPO_RAW, "pw": PW, "job": os.environ.get("JOB", "job.json")})
-            rc, out = k(["kernels", "push", "-p", "nb", "--accelerator", ACCEL])
-            os.remove("nb/run.py")
-            print("START", rc, out.strip()[-400:].replace(PW, "***"), flush=True)
-            status()
+        start()
     elif MODE == "status":
         status()
         try:      # a running session's log only comes as a stream: read it for a while, keep what arrived
@@ -173,6 +180,29 @@ try:
                           flush=True)
                 except Exception as e:
                     print("PROBE", slug, "logs error", repr(e)[:200], flush=True)
+    elif MODE == "delete":            # delete one of my own relay notebooks (DELETE = its slug), only when confirmed
+        slug = os.environ.get("DELETE", "")
+        owner = KERNEL.split("/")[0]
+        if os.environ.get("CONFIRM_DELETE") != "yes" or not slug.startswith("tg-toy-relay-"):
+            print("DELETE refused: needs CONFIRM_DELETE=yes and a tg-toy-relay-* slug", flush=True)
+        else:
+            rc, out = k(["kernels", "delete", owner + "/" + slug, "-y"], 180)
+            print("DELETE", slug, rc, out.strip()[-300:], flush=True)
+            time.sleep(15)
+            print("DELETE status now", k(["kernels", "status", owner + "/" + slug], 120)[1].strip()[-200:], flush=True)
+    elif MODE == "chain":             # wait for WAIT_FOR's run to end, then start KERNEL (JOB, ACCEL)
+        wait = os.environ.get("WAIT_FOR", "")
+        t0, st = time.time(), ""
+        while time.time() - t0 < float(os.environ.get("WAIT_MIN", "40")) * 60:
+            rc, st = k(["kernels", "status", wait], 120)
+            print("CHAIN", time.strftime("%H:%M:%S"), wait, st.strip()[-60:], flush=True)
+            if any(x in st for x in ("COMPLETE", "ERROR", "CANCEL")):
+                break
+            time.sleep(60)
+        if any(x in st for x in ("COMPLETE", "ERROR", "CANCEL")):
+            start()
+        else:
+            print("CHAIN gave up waiting", flush=True)
     elif MODE == "quota":
         rc, out = k(["quota"], 120)
         for line in out.strip().splitlines()[-30:]:
@@ -203,5 +233,5 @@ try:
 except Exception as e:
     print("RELAY ERROR", repr(e)[:500].replace(PW or "\0", "***"), flush=True)
 
-h = functools.partial(http.server.SimpleHTTPRequestHandler, directory="pub")
-http.server.ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "10000"))), h).serve_forever()
+while True:              # keep serving ./pub
+    time.sleep(3600)
