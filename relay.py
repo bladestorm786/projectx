@@ -80,8 +80,8 @@ try:
                                                     headers={"Authorization": "Bearer " + tokk}, timeout=90)
         slug = os.environ.get("CANCEL", "")
         owner = KERNEL.split("/")[0]
-        st = api("kernels.KernelsApiService", "GetKernelSessionStatus", {"userName": owner, "kernelSlug": slug}).text
-        print("CANCEL status of", slug, st[:200], flush=True)
+        rc, st = k(["kernels", "status", owner + "/" + slug], 120)
+        print("CANCEL status of", slug, st.strip()[-200:], flush=True)
         if "QUEUED" not in st:
             print("CANCEL skipped: not queued", flush=True)
         else:
@@ -89,6 +89,7 @@ try:
             r = api("search.SearchApiService", "ListEntities",
                     {"filters": {"listType": "API_LIST_TYPE_YOUR_WORK", "privacy": "ALL", "documentTypes": ["KERNEL"]},
                      "pageSize": 50})
+            print("CANCEL search", r.status_code, r.text[:300] if r.status_code != 200 else "", flush=True)
             for d in (r.json().get("documents", []) if r.status_code == 200 else []):
                 kd = d.get("kernelDocument") or {}
                 print("CANCEL found", d.get("slug"), "session", kd.get("sessionId"), d.get("updateTime"), flush=True)
@@ -98,8 +99,7 @@ try:
                 r = api("kernels.KernelsApiService", "CancelKernelSession", {"kernelSessionId": int(sid)})
                 print("CANCEL", slug, "session", sid, r.status_code, r.text[:300], flush=True)
                 time.sleep(20)
-                print("CANCEL status now", api("kernels.KernelsApiService", "GetKernelSessionStatus",
-                                                {"userName": owner, "kernelSlug": slug}).text[:200], flush=True)
+                print("CANCEL status now", k(["kernels", "status", owner + "/" + slug], 120)[1].strip()[-200:], flush=True)
             else:
                 print("CANCEL no session id found for", slug, "search", r.status_code, flush=True)
     elif MODE == "quota":
