@@ -190,6 +190,24 @@ try:
             print("DELETE", slug, rc, out.strip()[-300:], flush=True)
             time.sleep(15)
             print("DELETE status now", k(["kernels", "status", owner + "/" + slug], 120)[1].strip()[-200:], flush=True)
+    elif MODE == "displace":          # a new, CPU-only version of my own stuck notebook (DISPLACE = its slug) that just
+        slug = os.environ.get("DISPLACE", "")     # prints a line - in case a new version takes the stuck run's place
+        owner = KERNEL.split("/")[0]
+        if not slug.startswith("tg-toy-relay-"):
+            print("DISPLACE refused: not a tg-toy-relay-* slug", flush=True)
+        else:
+            print("DISPLACE before", k(["kernels", "status", owner + "/" + slug], 120)[1].strip()[-120:], flush=True)
+            os.makedirs("nbx", exist_ok=True)
+            json.dump({"id": owner + "/" + slug, "title": slug, "code_file": "run.py", "language": "python",
+                       "kernel_type": "script", "is_private": True, "enable_gpu": False, "enable_internet": False,
+                       "dataset_sources": [], "competition_sources": [], "kernel_sources": [], "model_sources": []},
+                      open("nbx/kernel-metadata.json", "w"))
+            open("nbx/run.py", "w").write('print("this version replaces a run that was stuck in the queue")\n')
+            rc, out = k(["kernels", "push", "-p", "nbx"])
+            print("DISPLACE push", rc, out.strip()[-300:], flush=True)
+            for _ in range(6):
+                time.sleep(20)
+                print("DISPLACE status", k(["kernels", "status", owner + "/" + slug], 120)[1].strip()[-120:], flush=True)
     elif MODE == "chain":             # wait for WAIT_FOR's run to end, then start KERNEL (JOB, ACCEL)
         wait = os.environ.get("WAIT_FOR", "")
         t0, st = time.time(), ""
