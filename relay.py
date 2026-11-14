@@ -42,7 +42,7 @@ print("JOB EXIT CODE", p.wait())
 try:
     if MODE == "start":
         rc, out = status()
-        if rc == 0 and "has status" in out:
+        if rc == 0 and "has status" in out and os.environ.get("FORCE") != "1":
             print("START skipped: this notebook already exists", flush=True)
         else:
             os.makedirs("nb", exist_ok=True)
@@ -135,16 +135,16 @@ try:
         owner = KERNEL.split("/")[0]
         red = lambda s: (s or "").replace(PW, "***") if PW else (s or "")
         with kapi.build_kaggle_client() as kc:
-            http = kc._http_client
-            http._init_session()
-            base = http._endpoint
+            hc = kc._http_client          # (not 'http': that name is the http.server module below)
+            hc._init_session()
+            base = hc._endpoint
             for slug in os.environ.get("PROBE", "").split(","):
                 for name, body in (("GetKernelSessionStatus", {"userName": owner, "kernelSlug": slug}),
                                    ("ListKernelSessionOutput", {"userName": owner, "kernelSlug": slug, "pageSize": 5}),
                                    ("GetKernel", {"userName": owner, "kernelSlug": slug})):
                     try:
-                        r = http._session.post("%s/v1/kernels.KernelsApiService/%s" % (base, name), json=body,
-                                               headers=http._session.headers, auth=http._session.auth, timeout=60)
+                        r = hc._session.post("%s/v1/kernels.KernelsApiService/%s" % (base, name), json=body,
+                                               headers=hc._session.headers, auth=hc._session.auth, timeout=60)
                         t = r.text
                         if name == "GetKernel":
                             try:
@@ -155,10 +155,10 @@ try:
                     except Exception as e:
                         print("PROBE", slug, name, "error", repr(e)[:200], flush=True)
                 try:
-                    r = http._session.get("%s/v1/kernels/logs/stream/%s/%s" % (base, owner, slug), stream=True, timeout=20,
+                    r = hc._session.get("%s/v1/kernels/logs/stream/%s/%s" % (base, owner, slug), stream=True, timeout=20,
                                           headers={"Accept": "text/event-stream, */*",
-                                                   "User-Agent": http._session.headers.get("User-Agent", "")},
-                                          auth=http._session.auth)
+                                                   "User-Agent": hc._session.headers.get("User-Agent", "")},
+                                          auth=hc._session.auth)
                     hd = {kk: vv for kk, vv in r.headers.items() if kk.lower() not in ("set-cookie",)}
                     body = b""
                     try:
